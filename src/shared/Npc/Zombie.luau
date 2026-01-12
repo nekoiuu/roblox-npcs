@@ -1,8 +1,10 @@
-local EncodingService = game:GetService("EncodingService")
 local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
 
+local Visualizer = require(script.Parent.Parent.Visualizer)
+
+local MAXATTMPS = 3
+local UPDATETICK = 0.2
 export type AgentParameters = {
 	AgentRadius: number,
 	AgentHeight: number,
@@ -19,28 +21,25 @@ type Props = {
 	AgentParameters: AgentParameters,
 }
 
+typeof(setmetatable(_, _))
 local Zombie = {}
 Zombie.__index = Zombie
 
-
 function Zombie.new(props: Props)
-	if not props.Char.PrimaryPart then
-		return
-	end
-
 	local self = {}
 
 	self.Char = props.Char
 	self.Humanoid = self.Char.Humanoid
 	self.HumanoidRootPart = self.Char.HumanoidRootPart
 
+	self.MaxStepHeight = 6
 	self.Area = props.Area
 	self.Vision = props.Vision
 
 	self.Active = false
 	self.Debug = false
 	self.Connection = nil
-
+	self.TargetChar = nil
 	self.PathfindingArg = props.AgentParameters
 
 	self.RaycastParams = RaycastParams.new()
@@ -55,29 +54,47 @@ function Zombie:_Debug(...)
 		return
 	end
 
-	local src,line = debug.info(2,"sl")
-	print({self,"["..src..":"..line.."]"},"-",...)
-
+	local src, line = debug.info(2, "sl")
+	print({ self, "[" .. src .. ":" .. line .. "]" }, "-", ...)
 end
 
 function Zombie:Spawn(CF: CFrame, parent: Instance?)
 	local Char: Model = self.Char
+	if not Char.PrimaryPart then
+		self:_Debug("can't spawn npc does't have primaryPart")
+		return
+	end
 	Char:PivotTo(CF)
 	Char.Parent = parent or workspace
 	Char.PrimaryPart:SetNetworkOwner(nil)
 	self:_Debug("Npc Spawn")
 end
 
-function Zombie:_CanSee(target: Model): boolean
-	local HumanoidRootPart = self.HumanoidRootPart
-	if not target.PrimaryPart then
-		self:_Debug("Target doesn't have Primary Part")
-		return false
+function Zombie:Start()
+	if self.Active then
+		return
 	end
+	self.Active = true
+	while self.Active do
+		self:_Logic()
+		task.wait(UPDATETICK)
+	end
+end
+
+function Zombie:_Logic()
+	local targetChar: Model? = self:_FindTarget()
+	if targetChar then
+		self.TargetChar = targetChar
+	end
+end
+
+function Zombie:_CanSee(targetChar: Model): boolean
+	local HumanoidRootPart:BasePart = self.HumanoidRootPart
+	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 
 	local origin = HumanoidRootPart.Position
-	local targetPos = target.PrimaryPart.Position
-	local direction: Vector3 = targetPos - origin * self.Vision
+	local targetPos = targetRoot.Position
+	local direction: Vector3 = (targetPos - origin).Unit * self.Vision
 
 	if self:_DistanceTo(targetPos) > self.Vision then
 		return false
@@ -92,18 +109,13 @@ function Zombie:_CanSee(target: Model): boolean
 	if not hit then
 		return false
 	end
-
-	return hit:IsDescendantOf(target)
-end 
+	return hit:IsDescendantOf(targetChar)
+end
 
 function Zombie:_IsTargetAlive(targetChar: Model): boolean
 	local humanoid = targetChar:FindFirstChild("Humanoid")
 
-	if not humanoid then
-		return false
-	end
-
-	if not humanoid:IsA("Humanoid") then
+	if not humanoid or not humanoid:IsA("Humanoid") then
 		return false
 	end
 
@@ -137,8 +149,9 @@ function Zombie:_FindTarget(): Model?
 
 	local targets = {}
 	for _, player in pairs(players) do
-		local char = player.Changed or player.CharacterAdded:Wait()
-		if self:_CanSee(char) and self:__IsTargetAlive(char) then
+		local char = player.Character or player.CharacterAdded:Wait()
+		print(self:_CanSee(char))
+		if self:_CanSee(char) and self:_IsTargetAlive(char) then
 			table.insert(targets, char)
 		end
 	end
@@ -146,13 +159,55 @@ function Zombie:_FindTarget(): Model?
 	return self:GetClosestTarget(targets)
 end
 
-function Zombie:_PathFindTo(target: Model)
-	if not target.PrimaryPart then
-		return
+
+
+function Zombie:_ShouldPathFind(targetChar:Model):boolean
+	local targetRoot =  targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
+	local HumanoidRootPart:BasePart = self.HumanoidRootPart
+	local heightDiff = math.abs(targetRoot.Position.Y - HumanoidRootPart.Position.Y)
+	local origin = HumanoidRootPart.Position
+	local yDirection = Vector3.new(0,heightDiff,0)
+
+	local yRay = workspace:Raycast(origin, yDirection)
+	if  yRay.Instance and yRay.Instance ~= targetChar then
+		Visualizer.Ray(origin, yRay.Position,self.Debug)
+		return true
 	end
 
-	local path = PathfindingService:CreatePath(self.AgentParameters)
-	path:ComputeAsync(self.HumanoidRootPart.Position, target.PrimaryPart.Position)
+	return false
+	
 end
 
+function Zombie:_PathFindTo(targetChar: Model, attmps:number?): boolean
+	if attmps and attmps == MAXATTMPS then
+		return false
+	end
+	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
+	local humanoid:Humanoid = self.Humanoid
+
+	local path = PathfindingService:CreatePath(self.AgentParameters)
+	path:ComputeAsync(self.HumanoidRootPart.Position, targetRoot.Position)
+
+	if path.Status ~= Enum.PathStatus.Success then
+		local _attmps = attmps or 0
+		_attmps += 1
+		return self:_PathFindTo(targetChar, _attmps)
+	end
+
+	local wayPoints = path:GetWaypoints()
+
+	Visualizer.WayPoint(wayPoints, self.Debug)
+	for _, waypoint in pairs(wayPoints) do
+		humanoid:MoveTo(waypoint.Position)
+		humanoid.MoveToFinished:Wait()
+	end
+
+	return true
+end
+
+function Zombie:_MovTo(targetChar:Model)
+	local humanoid: Humanoid = self.Humanoid
+	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
+	humanoid:MoveTo(targetRoot.Position)
+end
 return Zombie
