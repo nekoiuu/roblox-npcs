@@ -7,7 +7,7 @@ local newz = ai.new({
     Vision = 100,
     Area = 10
 })
-
+newz.Debug = true
 newz:Spawn(workspace.SpawnLocation.CFrame)
 task.wait(5)
 newz:Start()

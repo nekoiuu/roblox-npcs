@@ -1,10 +1,10 @@
 local Debris = game:GetService("Debris")
 local Visualizer = {} 
 local GAP = 20
-local DESTROYTIME = 5
+local DESTROYTIME = 1
 local function CreatePart():Part
     local part = Instance.new("Part")
-    part.Size = Vector3.new(1,1,1)
+    part.Material = Enum.Material.Neon
     part.Parent = workspace
     part.Color =  Color3.fromRGB(255,0,0)
     part.Anchored = true
@@ -35,7 +35,11 @@ function Visualizer.Ray(origin:Vector3,targetPos:Vector3,IsActive)
     if IsActive == false then
         return
     end
-    CreatePart().Size = origin - targetPos
+    local p = CreatePart()
+    local distance = (origin - targetPos).Magnitude
+    p.Size = Vector3.new(0.2,0.2,distance)
+    p.CFrame = CFrame.lookAt(origin, targetPos)*CFrame.new(0, 0, -distance/2)
+    print(p)
 end
 
 return  Visualizer

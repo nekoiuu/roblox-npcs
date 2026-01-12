@@ -21,7 +21,6 @@ type Props = {
 	AgentParameters: AgentParameters,
 }
 
-typeof(setmetatable(_, _))
 local Zombie = {}
 Zombie.__index = Zombie
 
@@ -32,7 +31,7 @@ function Zombie.new(props: Props)
 	self.Humanoid = self.Char.Humanoid
 	self.HumanoidRootPart = self.Char.HumanoidRootPart
 
-	self.MaxStepHeight = 6
+	self.MaxStepHeight = self.Humanoid.JumpHeight + 4
 	self.Area = props.Area
 	self.Vision = props.Vision
 
@@ -44,6 +43,7 @@ function Zombie.new(props: Props)
 
 	self.RaycastParams = RaycastParams.new()
 	self.RaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+	self.RaycastParams.RespectCanCollide = true
 	self.RaycastParams.FilterDescendantsInstances = { self.Char }
 
 	return setmetatable(self, Zombie)
@@ -85,11 +85,12 @@ function Zombie:_Logic()
 	local targetChar: Model? = self:_FindTarget()
 	if targetChar then
 		self.TargetChar = targetChar
+		self:_CanSee(targetChar)
 	end
 end
 
 function Zombie:_CanSee(targetChar: Model): boolean
-	local HumanoidRootPart:BasePart = self.HumanoidRootPart
+	local HumanoidRootPart: BasePart = self.HumanoidRootPart
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 
 	local origin = HumanoidRootPart.Position
@@ -101,6 +102,7 @@ function Zombie:_CanSee(targetChar: Model): boolean
 	end
 
 	local result = workspace:Raycast(origin, direction, self.RaycastParams)
+	Visualizer.Ray(origin, direction, self.Debug)
 	if not result then
 		return false
 	end
@@ -112,7 +114,7 @@ function Zombie:_CanSee(targetChar: Model): boolean
 	return hit:IsDescendantOf(targetChar)
 end
 
-function Zombie:_IsTargetAlive(targetChar: Model): boolean
+function Zombie:_IsAlive(targetChar: Model): boolean
 	local humanoid = targetChar:FindFirstChild("Humanoid")
 
 	if not humanoid or not humanoid:IsA("Humanoid") then
@@ -150,8 +152,7 @@ function Zombie:_FindTarget(): Model?
 	local targets = {}
 	for _, player in pairs(players) do
 		local char = player.Character or player.CharacterAdded:Wait()
-		print(self:_CanSee(char))
-		if self:_CanSee(char) and self:_IsTargetAlive(char) then
+		if self:_CanSee(char) and self:_IsAlive(char) then
 			table.insert(targets, char)
 		end
 	end
@@ -159,31 +160,32 @@ function Zombie:_FindTarget(): Model?
 	return self:GetClosestTarget(targets)
 end
 
-
-
-function Zombie:_ShouldPathFind(targetChar:Model):boolean
-	local targetRoot =  targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
-	local HumanoidRootPart:BasePart = self.HumanoidRootPart
-	local heightDiff = math.abs(targetRoot.Position.Y - HumanoidRootPart.Position.Y)
+function Zombie:_ShouldPathFind(targetChar: Model): boolean
+	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
+	local HumanoidRootPart: BasePart = self.HumanoidRootPart
 	local origin = HumanoidRootPart.Position
-	local yDirection = Vector3.new(0,heightDiff,0)
+	local direction = (targetRoot.Position - origin).Unit
 
-	local yRay = workspace:Raycast(origin, yDirection)
-	if  yRay.Instance and yRay.Instance ~= targetChar then
-		Visualizer.Ray(origin, yRay.Position,self.Debug)
+	local TargetRay = workspace:Raycast(origin, origin + direction, self.RaycastParams)
+	Visualizer.Ray(origin, direction, self.Debug)
+	if not TargetRay then
+		self:Debug("Ray cast Fail")
+		return false
+	end
+
+	if math.abs(TargetRay.Position.Y - origin) > self.MaxStepHeight then
 		return true
 	end
 
 	return false
-	
 end
 
-function Zombie:_PathFindTo(targetChar: Model, attmps:number?): boolean
+function Zombie:_PathFindTo(targetChar: Model, attmps: number?): boolean
 	if attmps and attmps == MAXATTMPS then
 		return false
 	end
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
-	local humanoid:Humanoid = self.Humanoid
+	local humanoid: Humanoid = self.Humanoid
 
 	local path = PathfindingService:CreatePath(self.AgentParameters)
 	path:ComputeAsync(self.HumanoidRootPart.Position, targetRoot.Position)
@@ -205,7 +207,7 @@ function Zombie:_PathFindTo(targetChar: Model, attmps:number?): boolean
 	return true
 end
 
-function Zombie:_MovTo(targetChar:Model)
+function Zombie:_MovTo(targetChar: Model)
 	local humanoid: Humanoid = self.Humanoid
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 	humanoid:MoveTo(targetRoot.Position)
