@@ -3,9 +3,10 @@ local Players = game:GetService("Players")
 
 local Visualizer = require(script.Parent.Parent.Visualizer)
 
-local MAXATTMPS = 3
+local attempts_LIMIT = 3
 local UPDATETICK = 0.2
-export type AgentParameters = {
+
+export type PathfindingArg = {
 	AgentRadius: number,
 	AgentHeight: number,
 	AgentCanJump: boolean,
@@ -18,18 +19,53 @@ type Props = {
 	Char: Model,
 	Area: number,
 	Vision: number,
-	AgentParameters: AgentParameters,
+	PathfindingArg: PathfindingArg?,
 }
 
-local Zombie = {}
-Zombie.__index = Zombie
+local Zombie = {} :: ZombieClass
+(Zombie :: any).__index = Zombie
 
-function Zombie.new(props: Props)
-	local self = {}
+export type ZombieClass = typeof(setmetatable(
+	{} :: {
+		Char:Model,
+		Humanoid:Humanoid,
+		HumanoidRootPart:BasePart,
+    	MaxStepHeight:number,
+    	Area:number,
+    	Vision:number,
+    	Active:boolean,
+    	Debug:boolean,
+    	Connection:RBXScriptConnection?,
+    	TargetChar:Model?,
+    	PathfindingArg:PathfindingArg?,
+    	RaycastParams:RaycastParams,
+
+		_FindTarget:(self:ZombieClass) -> Model?,
+		_Debug:(self:ZombieClass,...any) -> (),
+		_CanSee:(self:ZombieClass,targetChar:Model) -> boolean,
+		_IsAlive:(self:ZombieClass,targetChar:Model) -> boolean,
+		_DistanceTo:(self:ZombieClass,Position:Vector3) -> number,
+		_GetClosestTarget:(self:ZombieClass,targetChars:{Model}) -> Model,
+		_PathFindTo:(self:ZombieClass,targetChar:Model,attempts:number?) -> boolean,
+		_ShouldPathFind:(self:ZombieClass,targetChar:Model) -> boolean,
+		_MovTo:(self:ZombieClass,targetChar:Model) -> (),
+		_Logic:(self:ZombieClass) -> (),
+
+		new:(props:Props) -> ZombieClass,
+		Spawn:(self:ZombieClass,CF:CFrame,parent:Instance?) -> (),
+		Start:(self:ZombieClass) -> (),
+		
+	},
+	Zombie
+))
+
+
+function Zombie.new(props: Props):ZombieClass
+	local self:ZombieClass = setmetatable({}::any,Zombie)::ZombieClass
 
 	self.Char = props.Char
-	self.Humanoid = self.Char.Humanoid
-	self.HumanoidRootPart = self.Char.HumanoidRootPart
+	self.Humanoid = self.Char:FindFirstChild("Humanoid") :: Humanoid
+	self.HumanoidRootPart = self.Char:FindFirstChild("HumanoidRootPart") :: BasePart
 
 	self.MaxStepHeight = self.Humanoid.JumpHeight + 4
 	self.Area = props.Area
@@ -39,14 +75,14 @@ function Zombie.new(props: Props)
 	self.Debug = false
 	self.Connection = nil
 	self.TargetChar = nil
-	self.PathfindingArg = props.AgentParameters
+	self.PathfindingArg = props.PathfindingArg
 
 	self.RaycastParams = RaycastParams.new()
 	self.RaycastParams.FilterType = Enum.RaycastFilterType.Exclude
 	self.RaycastParams.RespectCanCollide = true
 	self.RaycastParams.FilterDescendantsInstances = { self.Char }
 
-	return setmetatable(self, Zombie)
+	return self
 end
 
 function Zombie:_Debug(...)
@@ -84,16 +120,18 @@ end
 function Zombie:_Logic()
 	local targetChar: Model? = self:_FindTarget()
 	if targetChar then
-		self.TargetChar = targetChar
-		self:_CanSee(targetChar)
+		if self:_ShouldPathFind(targetChar) then
+			self:_PathFindTo(targetChar)
+		else
+			self:_MovTo(targetChar)
+		end
 	end
 end
 
 function Zombie:_CanSee(targetChar: Model): boolean
-	local HumanoidRootPart: BasePart = self.HumanoidRootPart
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 
-	local origin = HumanoidRootPart.Position
+	local origin = self.HumanoidRootPart.Position
 	local targetPos = targetRoot.Position
 	local direction: Vector3 = (targetPos - origin).Unit * self.Vision
 
@@ -128,7 +166,7 @@ function Zombie:_DistanceTo(Position: Vector3): number
 	return (self.HumanoidRootPart.Position - Position).Magnitude
 end
 
-function Zombie:GetClosestTarget(targetChars: { Model }): Model?
+function Zombie:_GetClosestTarget(targetChars: { Model }): Model?
 	local closestTarget: Model? = nil
 	local closestDistance = math.huge
 
@@ -157,51 +195,54 @@ function Zombie:_FindTarget(): Model?
 		end
 	end
 
-	return self:GetClosestTarget(targets)
+	return self:_GetClosestTarget(targets)
 end
+
 
 function Zombie:_ShouldPathFind(targetChar: Model): boolean
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
-	local HumanoidRootPart: BasePart = self.HumanoidRootPart
-	local origin = HumanoidRootPart.Position
-	local direction = (targetRoot.Position - origin).Unit
 
-	local TargetRay = workspace:Raycast(origin, origin + direction, self.RaycastParams)
+	local origin = self.HumanoidRootPart.Position
+	local targetPos = targetRoot.Position
+	local direction: Vector3 = (targetPos - origin).Unit * self.Vision
+
+	local result = workspace:Raycast(origin, direction, self.RaycastParams)
+
 	Visualizer.Ray(origin, direction, self.Debug)
-	if not TargetRay then
-		self:Debug("Ray cast Fail")
+
+	if not result then
+		self:_Debug("Ray cast Fail")
 		return false
 	end
 
-	if math.abs(TargetRay.Position.Y - origin) > self.MaxStepHeight then
+	if math.abs(result.Position.Y - origin.Y) > self.MaxStepHeight then
 		return true
 	end
 
 	return false
 end
 
-function Zombie:_PathFindTo(targetChar: Model, attmps: number?): boolean
-	if attmps and attmps == MAXATTMPS then
+function Zombie:_PathFindTo(targetChar: Model, attempts: number?): boolean
+	if attempts and attempts == attempts_LIMIT then
 		return false
 	end
+	self:_Debug("Use PathFindTo")
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 	local humanoid: Humanoid = self.Humanoid
-
-	local path = PathfindingService:CreatePath(self.AgentParameters)
+	local path = PathfindingService:CreatePath({AgentCanJump = true})
 	path:ComputeAsync(self.HumanoidRootPart.Position, targetRoot.Position)
 
 	if path.Status ~= Enum.PathStatus.Success then
-		local _attmps = attmps or 0
-		_attmps += 1
-		return self:_PathFindTo(targetChar, _attmps)
+		local _attempts = attempts or 0
+		_attempts += 1
+		return self:_PathFindTo(targetChar, _attempts)
 	end
 
 	local wayPoints = path:GetWaypoints()
-
 	Visualizer.WayPoint(wayPoints, self.Debug)
-	for _, waypoint in pairs(wayPoints) do
-		humanoid:MoveTo(waypoint.Position)
-		humanoid.MoveToFinished:Wait()
+	for _, waypoint in ipairs(wayPoints) do
+    humanoid:MoveTo(waypoint.Position)
+    humanoid.MoveToFinished:Wait()
 	end
 
 	return true
@@ -212,4 +253,5 @@ function Zombie:_MovTo(targetChar: Model)
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 	humanoid:MoveTo(targetRoot.Position)
 end
+
 return Zombie
