@@ -1,9 +1,8 @@
 local PathfindingService = game:GetService("PathfindingService")
 local Players = game:GetService("Players")
-
 local Visualizer = require(script.Parent.Parent.Visualizer)
 
-local attempts_LIMIT = 3
+local ATTEMPTS_LIMIT = 3
 local UPDATETICK = 0.2
 
 export type PathfindingArg = {
@@ -241,7 +240,7 @@ function Zombie:_ShouldChangeTarget(newTarget:Model):boolean
 end
 
 function Zombie:_PathFindTo(targetChar: Model, attempts: number?): boolean
-	if attempts and attempts == attempts_LIMIT then
+	if attempts and attempts == ATTEMPTS_LIMIT then
 		return false
 	end
 	self:_Debug("Use PathFindTo")
