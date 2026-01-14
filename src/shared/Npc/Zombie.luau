@@ -48,13 +48,14 @@ export type ZombieClass = typeof(setmetatable(
 		_GetClosestTarget:(self:ZombieClass,targetChars:{Model}) -> Model,
 		_PathFindTo:(self:ZombieClass,targetChar:Model,attempts:number?) -> boolean,
 		_ShouldPathFind:(self:ZombieClass,targetChar:Model) -> boolean,
+		_ShouldChangeTarget:(self:ZombieClass,newTarget:Model) -> boolean,
 		_MovTo:(self:ZombieClass,targetChar:Model) -> (),
 		_Logic:(self:ZombieClass) -> (),
 
 		new:(props:Props) -> ZombieClass,
 		Spawn:(self:ZombieClass,CF:CFrame,parent:Instance?) -> (),
 		Start:(self:ZombieClass) -> (),
-		
+		Destory:(self:ZombieClass) -> ()	
 	},
 	Zombie
 ))
@@ -118,13 +119,19 @@ function Zombie:Start()
 end
 
 function Zombie:_Logic()
-	local targetChar: Model? = self:_FindTarget()
-	if targetChar then
-		if self:_ShouldPathFind(targetChar) then
-			self:_PathFindTo(targetChar)
-		else
-			self:_MovTo(targetChar)
-		end
+	local targetChar = self:_FindTarget()
+	if not targetChar then
+		return
+	end
+
+	if self:_ShouldChangeTarget(targetChar) then
+		self.TargetChar = targetChar
+	end
+
+	if self:_ShouldPathFind(self.targetChar) then
+		self:_PathFindTo(self.targetChar)
+	else
+		self._MovTo(self.TargetChar)
 	end
 end
 
@@ -198,7 +205,6 @@ function Zombie:_FindTarget(): Model?
 	return self:_GetClosestTarget(targets)
 end
 
-
 function Zombie:_ShouldPathFind(targetChar: Model): boolean
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 
@@ -222,6 +228,18 @@ function Zombie:_ShouldPathFind(targetChar: Model): boolean
 	return false
 end
 
+function Zombie:_ShouldChangeTarget(newTarget:Model):boolean
+	if not self.TargetChar then
+		return true
+	end
+
+	if self:_DistanceTo(newTarget) > self:_DistanceTo(self.TargetChar) then
+		return true
+	end
+	
+	return false
+end
+
 function Zombie:_PathFindTo(targetChar: Model, attempts: number?): boolean
 	if attempts and attempts == attempts_LIMIT then
 		return false
@@ -229,7 +247,7 @@ function Zombie:_PathFindTo(targetChar: Model, attempts: number?): boolean
 	self:_Debug("Use PathFindTo")
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 	local humanoid: Humanoid = self.Humanoid
-	local path = PathfindingService:CreatePath({AgentCanJump = true})
+	local path = PathfindingService:CreatePath(self.PathfindingArg)
 	path:ComputeAsync(self.HumanoidRootPart.Position, targetRoot.Position)
 
 	if path.Status ~= Enum.PathStatus.Success then
@@ -252,6 +270,26 @@ function Zombie:_MovTo(targetChar: Model)
 	local humanoid: Humanoid = self.Humanoid
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 	humanoid:MoveTo(targetRoot.Position)
+end
+
+function Zombie:Destroy()
+	if self.Connection then
+		self.Connection:Disconnct()
+		self.Connection = nil
+	end
+
+	self.Char:Destory()
+	self.Humanoid = nil
+	self.HumanoidRootPart = nil
+	self.Char = nil
+	self.MaxStepHeight = nil
+	self.Area = nil
+	self.Vision = nil
+
+	self.Active = nil
+	self.Debug = nil
+	self.TargetChar = nil
+	self.PathfindingArg = nil
 end
 
 return Zombie
