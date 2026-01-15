@@ -16,7 +16,6 @@ export type PathfindingArg = {
 
 type Props = {
 	Char: Model,
-	Area: number,
 	Vision: number,
 	PathfindingArg: PathfindingArg?,
 }
@@ -30,7 +29,6 @@ export type ZombieClass = typeof(setmetatable(
 		Humanoid:Humanoid,
 		HumanoidRootPart:BasePart,
     	MaxStepHeight:number,
-    	Area:number,
     	Vision:number,
     	Active:boolean,
     	Debug:boolean,
@@ -68,7 +66,6 @@ function Zombie.new(props: Props):ZombieClass
 	self.HumanoidRootPart = self.Char:FindFirstChild("HumanoidRootPart") :: BasePart
 
 	self.MaxStepHeight = self.Humanoid.JumpHeight + 4
-	self.Area = props.Area
 	self.Vision = props.Vision
 
 	self.Active = false
@@ -123,15 +120,10 @@ function Zombie:_Logic()
 		return
 	end
 
-	if self:_ShouldChangeTarget(targetChar) then
-		self.TargetChar = targetChar
-	end
-
-	if self:_ShouldPathFind(self.targetChar) then
-		self:_PathFindTo(self.targetChar)
+	if self:_ShouldPathFind(targetChar) then
+		self:_PathFindTo(targetChar)
 	else
-		self._MovTo(self.TargetChar)
-	end
+		self:_MovTo(targetChar)
 end
 
 function Zombie:_CanSee(targetChar: Model): boolean
@@ -205,6 +197,7 @@ function Zombie:_FindTarget(): Model?
 end
 
 function Zombie:_ShouldPathFind(targetChar: Model): boolean
+	
 	local targetRoot = targetChar:FindFirstChild("HumanoidRootPart") :: BasePart
 
 	local origin = self.HumanoidRootPart.Position
