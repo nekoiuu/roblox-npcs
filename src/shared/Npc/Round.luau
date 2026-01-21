@@ -1,4 +1,6 @@
 local Players = game:GetService("Players")
+local  signal = require(script.Parent.Signal)
+
 local module = {}
 
 module.__index = module
@@ -8,34 +10,100 @@ type playerJoinDataType = {
     Char:Model,
 }
 type props = {
-    p1:playerJoinDataType,
-    p2:playerJoinDataType,
     SpawnOutCF:CFrame,
-    Area:Model
+
+    Pad1:Part,
+    Pad1SpawnCF:CFrame,
+
+    Pad2:Part,
+    Pad2SpawnCF:CFrame,
+
 }
+
+function Disconnects(connections:{[number]:RBXScriptConnection})
+
+    for _,con in ipairs(connections) do
+        con:Disconnect()
+    end
+
+end
+
+function SpawnChar(char:Model?,cf:CFrame)
+    if char then 
+        char:PivotTo(cf)
+     end
+    
+end
 
 function module.new(props:props)
     local self = setmetatable({}, module)
 
-    self.p1 = props.p1
-    self.p2 = props.p2
+    self.p1 = nil
+    self.p2 = nil
 
-    self.Area = props.Area
+    self.SpawnOutCF = props.SpawnOutCF
+
+    self.Pad1 = props.Pad1
+    self.Pad1SpawnCF = props.Pad1SpawnCF
+
+    self.Pad2 = props.Pad2
+    self.Pad2SpawnCF = props.Pad2SpawnCF
+
     self.Active = false
+
     self.Connection = {}
+    self.ListeningConnections = {}
+
     self.OnDestroy = false
     self.SpawnOutCF = props.SpawnOutCF
 
+
+    self.OnPlayerRemoved = signal.new()
+    self.OnPlayerAdded = signal.new()
+    self.OnRoundStart = signal.new()
+    self.OnRoundEnd = signal.new()
 
     return self
 
 end
 
+function module:ListeningPlayerRemove()
+
+    local con = Players.PlayerRemoving:Connect(function(plr)
+        if plr ==  self.p1.Player then
+            self:EndRound(self.p2.Player)
+        elseif plr == self.p2.Player then
+            self:EndRound(self.p1.Player)
+        end
+    end)
+
+    table.insert(self.ListeningConnections,con)
+
+end
+
+
+function module:ListeningPlayerDied()
+    
+    local char1:Model = self.p1.Char
+    local hum1 = char1:FindFirstChild("Humanoid") :: Humanoid
+
+    hum1.Died:Once(function()
+        self:EndRound(self.p2.Player)
+    end)
+
+    local char2:Model = self.p1.Char
+    local hum2 = char2:FindFirstChild("Humanoid") :: Humanoid
+
+    hum2.Died:Once(function()
+        self:EndRound(self.p1.Player)
+    end)
+
+end
+
 function module:PadSetUp()
 
-    local area:Model = self.Area
-    local pad1 = area:FindFirstChild("Pad1") ::  Part
-    local pad2 = area:FindFirstChild("Pad2") :: Part
+    local pad1:Part = self.Pad1
+    local pad2:Part = self.Pad2
     
     local pad1TouchedCon = pad1.Touched:Connect(function(hitPart)
         local char = hitPart:FindFirstAncestorOfClass("Model")
@@ -81,56 +149,26 @@ function module:AddPlayer(data:playerJoinDataType,padN:number)
     if padN == 1 then
         if self.p1 then return end
         self.p1 = data
+        self.OnPlayerAdded:Fire(data,padN)
+        self:StartRound()
     elseif padN  ==  2  then
         if self.p2 then return end
         self.p2 = data
+        self:StartRound()
+        self.OnPlayerAdded:Fire(data,padN)
     end
 
 end
 
 function module:RemovePlayer(player:Player)
+
     if self.p1.Player == player then
         self.p1 = nil
+        self.OnPlayerRemoved:Fire(player,1)
     elseif self.p2.Player == player  then
         self.p2 = nil
+        self.OnPlayerRemoved:Fire(player,2)
     end
-
-end
-
-function Spawn(model:Model?,cf:CFrame)
-    if model then
-        model:PivotTo(cf)
-    end
-end
-
-function module:ConnectionSetUp()
-
-    local p1:playerJoinDataType = self.p1
-    local p2:playerJoinDataType = self.p2
-
-    local PlayerRemovingCon = Players.PlayerRemoving:Connect(function(plr:Player)
-        if plr == p1.Player or plr == p2.Player then
-            self:EndRound()
-        end
-    end)
-
-
-    local hum1 = p1.Char:FindFirstChild("Humanoid") :: Humanoid 
-    local hum2 = p2.Char:FindFirstChild("Humanoid") :: Humanoid 
-
-    local P1DiedCon = hum1.Died:Connect(function()
-        self:EndRound()
-    end)
-
-    
-    local P2DiedCon = hum2.Died:Connect(function()
-        self:EndRound()
-    end)
-
-
-    table.insert(self.Connection,PlayerRemovingCon)
-    table.insert(self.Connection,P1DiedCon)
-    table.insert(self.Connection,P2DiedCon)
 
 end
 
@@ -139,34 +177,29 @@ function module:StartRound()
     if not self.p1 or not self.p2 then return end
     if self.Active == true then return end
 
-    Spawn(self.p1.Char,self.SpawnOutCF)
-    Spawn(self.p2.Char,self.SpawnOutCF)
-
-    self:ConnectionSetUp()
-
+    SpawnChar(self.P1.Char, self.Pad1SpawnCF)
+    SpawnChar(self.P2.Char, self.Pad2SpawnCF)
+    self:ListeningPlayerRemove()
+    self:ListeningPlayerDied()
     self.Active = true
+    self.OnRoundStart:Fire()
+
 end
 
+function module:EndRound(Winner:Player)
 
-function module:EndRound()
-    if self.OnDestroy == true then return end
-    self.OnDestroy = true
+    if self.Acvite == false then return end
+    self.Acvite = false
 
-    for _,con:RBXScriptConnection in ipairs(self.Connection) do
-        con:Disconnect()
-    end
+    SpawnChar(self.P1.Char, self.SpawnOutCF)
+    SpawnChar(self.P2.Char, self.SpawnOutCF)
 
-    Spawn(self.p1.Char,self.SpawnOutCF)
-    Spawn(self.p2.Char,self.SpawnOutCF)
-
+    Disconnects(self.ListeningConnections)
     self.p1 = nil
     self.p2 = nil
-    self.Connection = nil
-    self.Active = nil
-    self.Connection = nil
-    self.OnDestroy = nil
+
+    self.OnRoundEnd:Fire(Winner)
 
 end
-
 
 return module
